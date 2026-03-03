@@ -4,17 +4,17 @@ import triton
 import triton.language as tl
 import triton.runtime.driver as driver
 
-import time
-import os
-import sys
-import math
-
 def get_npu_properties()
     device = torch.npu.current_device()
     return driver.active.utils.get_device_properties(device)
 
 @triton.jit
-def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_CORES):
+def _compute_pid(
+    tile_id,
+    num_pid_in_group: tl.constexpr,
+    num_pid_m: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
+):
     group_id = tile_id // num_pid_in_group
     first_pid_m = group_id * GROUP_SIZE_M
     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
@@ -57,7 +57,7 @@ def deterministic_matmul_kernel(
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
 
     for tile_id in tl.range(pid, num_blocks, NUM_CORES):
-        pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_CORES)
+        pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         start_m = pid_m * BLOCK_SIZE_M
         start_n = pid_n * BLOCK_SIZE_N
         offs_am = start_m + tl.arange(0, BLOCK_SIZE_M)
@@ -85,7 +85,7 @@ def deterministic_matmul_kernel(
             accumulator = tl.dot(a, b, accumulator)
 
         tile_id_c += NUM_CORES
-        pid_m, pid_n = _compute_pid(tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_CORES)
+        pid_m, pid_n = _compute_pid(tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
         if C_LARGE:
@@ -100,8 +100,8 @@ def deterministic_matmul(a: torch.Tensor, b: torch.Tensor):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.dtype == b.dtype, "Incompatible dtypes"
-    assert a.device.type == "npu",
-    assert b.device.type == "npu",
+    assert a.device.type == "npu"
+    assert b.device.type == "npu"
 
     M, K = a.shape
     K, N = b.shape
@@ -163,7 +163,7 @@ with torch_npu.profiler.profile(
     profile_memory=True,
     with_stack=False,
     with_modules=False,
-    schedule=torch_npu.profiler.schedule(wait=1,
+    schedule=torch_npu.profiler.schedule(wait=1,s
                                         warmup=10,
                                         active=30,
                                         repeat=10,
